@@ -1,0 +1,35 @@
+.obcrypt-modal-desc {
+  color: var(--text-muted);
+  margin-bottom: 1em;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.obcrypt-password-input {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 1em;
+  font-size: 1em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.obcrypt-password-input:focus {
+  border-color: var(--interactive-accent);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
+}
+
+.obcrypt-btn-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 1.25em;
+}
+
+.obcrypt-btn-row button {
+  padding: 6px 20px;
+  min-width: 80px;
+}

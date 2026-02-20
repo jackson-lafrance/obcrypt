@@ -1,0 +1,9 @@
+{
+  "id": "obcrypt",
+  "name": "Obcrypt",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Transparently encrypts notes tagged with #private on the filesystem while keeping them readable in the editor.",
+  "author": "slaade",
+  "isDesktopOnly": false
+}
