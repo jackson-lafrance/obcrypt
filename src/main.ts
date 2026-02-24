@@ -76,16 +76,19 @@ function contentHasPrivateTag(content: string): boolean {
 
 export default class ObcryptPlugin extends Plugin {
   private password: string | null = null;
-  private originalRead: ((path: string) => Promise<string>) | null = null;
-  private originalWrite:
-    | ((path: string, data: string, opts?: any) => Promise<void>)
-    | null = null;
-  private patchedPaths = new Set<string>();
-  private decrypting = false;
-  private encrypting = false;
+  private privatePaths = new Set<string>();
+  private locked = true;
+  private statusBarEl: HTMLElement | null = null;
 
   async onload() {
-    this.patchVaultAdapter();
+    this.statusBarEl = this.addStatusBarItem();
+    this.updateStatusBar();
+
+    this.addCommand({
+      id: "obcrypt-lock",
+      name: "Lock vault",
+      callback: () => this.lockVault(),
+    });
 
     this.addCommand({
       id: "obcrypt-change-password",
@@ -93,37 +96,33 @@ export default class ObcryptPlugin extends Plugin {
       callback: () => this.changePassword(),
     });
 
-    this.addCommand({
-      id: "obcrypt-lock",
-      name: "Lock all private notes now",
-      callback: () => this.encryptAllPrivateNow(),
-    });
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (!(file instanceof TFile) || !file.path.endsWith(".md")) return;
+        if (this.locked) return;
+        this.app.vault.cachedRead(file).then((content) => {
+          if (contentHasPrivateTag(content)) {
+            this.privatePaths.add(file.path);
+          } else {
+            this.privatePaths.delete(file.path);
+          }
+        });
+      })
+    );
 
     this.app.workspace.onLayoutReady(() => this.init());
   }
 
   onunload() {
-    if (this.password && this.originalWrite) {
-      const pw = this.password;
-      const origWrite = this.originalWrite;
-      for (const path of this.patchedPaths) {
-        const file = this.app.vault.getAbstractFileByPath(path);
-        if (file instanceof TFile) {
-          this.app.vault.cachedRead(file).then(async (content) => {
-            if (contentHasPrivateTag(content) && !isEncrypted(content)) {
-              try {
-                const cipher = await encrypt(content, pw);
-                await origWrite(file.path, cipher);
-              } catch {
-                // best-effort
-              }
-            }
-          });
-        }
-      }
+    if (!this.locked && this.password) {
+      this.encryptTrackedFiles();
     }
-    this.unpatchVaultAdapter();
     clearKeyCache();
+  }
+
+  private updateStatusBar() {
+    if (!this.statusBarEl) return;
+    this.statusBarEl.setText(this.locked ? "🔒 Obcrypt: Locked" : "🔓 Obcrypt: Unlocked");
   }
 
   private async init() {
@@ -137,6 +136,9 @@ export default class ObcryptPlugin extends Plugin {
         new Notice("Obcrypt: No password set — plugin disabled for this session.");
         return;
       }
+      this.locked = false;
+      this.updateStatusBar();
+      this.scanForPrivateFiles();
       new Notice("Obcrypt: Ready. Tag any note with #private to encrypt it.");
       return;
     }
@@ -153,9 +155,8 @@ export default class ObcryptPlugin extends Plugin {
         return;
       }
 
-      const firstFile = encryptedFiles[0];
       try {
-        await decrypt(firstFile.raw, this.password);
+        await decrypt(encryptedFiles[0].raw, this.password);
         break;
       } catch {
         this.password = null;
@@ -166,7 +167,10 @@ export default class ObcryptPlugin extends Plugin {
       }
     }
 
-    await this.decryptAllPrivateOnLoad(encryptedFiles);
+    await this.decryptAll(encryptedFiles);
+    this.locked = false;
+    this.updateStatusBar();
+    this.scanForPrivateFiles();
     new Notice(`Obcrypt: Unlocked ${encryptedFiles.length} note(s).`);
   }
 
@@ -174,15 +178,25 @@ export default class ObcryptPlugin extends Plugin {
     const results: { file: TFile; raw: string }[] = [];
     for (const file of this.app.vault.getMarkdownFiles()) {
       try {
-        const raw = await this.originalRead!(file.path);
+        const raw = await this.app.vault.adapter.read(file.path);
         if (isEncrypted(raw)) {
           results.push({ file, raw });
         }
       } catch {
-        // skip unreadable files
+        // skip
       }
     }
     return results;
+  }
+
+  private scanForPrivateFiles() {
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      this.app.vault.cachedRead(file).then((content) => {
+        if (contentHasPrivateTag(content)) {
+          this.privatePaths.add(file.path);
+        }
+      });
+    }
   }
 
   private promptPassword(message: string): Promise<void> {
@@ -195,78 +209,16 @@ export default class ObcryptPlugin extends Plugin {
     });
   }
 
-  private patchVaultAdapter() {
-    const adapter = this.app.vault.adapter as any;
-
-    this.originalRead = adapter.read.bind(adapter);
-    this.originalWrite = adapter.write.bind(adapter);
-
-    const plugin = this;
-
-    adapter.read = async function (path: string) {
-      const raw: string = await plugin.originalRead!(path);
-      if (isEncrypted(raw) && plugin.password && !plugin.decrypting) {
-        try {
-          plugin.decrypting = true;
-          const plain = await decrypt(raw, plugin.password);
-          plugin.patchedPaths.add(path);
-          return plain;
-        } catch {
-          return raw;
-        } finally {
-          plugin.decrypting = false;
-        }
-      }
-      return raw;
-    };
-
-    adapter.write = async function (
-      path: string,
-      data: string,
-      opts?: any
-    ) {
-      if (
-        plugin.password &&
-        !plugin.encrypting &&
-        path.endsWith(".md") &&
-        contentHasPrivateTag(data)
-      ) {
-        try {
-          plugin.encrypting = true;
-          const cipher = await encrypt(data, plugin.password);
-          plugin.patchedPaths.add(path);
-          return plugin.originalWrite!(path, cipher, opts);
-        } catch (e) {
-          new Notice(`Obcrypt: Failed to encrypt ${path}`);
-          console.error("Obcrypt encrypt error", e);
-          return plugin.originalWrite!(path, data, opts);
-        } finally {
-          plugin.encrypting = false;
-        }
-      }
-      if (!contentHasPrivateTag(data) && plugin.patchedPaths.has(path)) {
-        plugin.patchedPaths.delete(path);
-      }
-      return plugin.originalWrite!(path, data, opts);
-    };
-  }
-
-  private unpatchVaultAdapter() {
-    if (this.originalRead && this.originalWrite) {
-      const adapter = this.app.vault.adapter as any;
-      adapter.read = this.originalRead;
-      adapter.write = this.originalWrite;
-    }
-  }
-
-  private async decryptAllPrivateOnLoad(
-    encryptedFiles: { file: TFile; raw: string }[]
-  ) {
+  /**
+   * Decrypt all encrypted files — writes plaintext to disk so Obsidian
+   * indexes everything correctly (graph, backlinks, tags, search).
+   */
+  private async decryptAll(encryptedFiles: { file: TFile; raw: string }[]) {
     if (!this.password) return;
     for (const { file, raw } of encryptedFiles) {
       try {
         const plain = await decrypt(raw, this.password);
-        this.patchedPaths.add(file.path);
+        this.privatePaths.add(file.path);
         await this.app.vault.modify(file, plain);
       } catch (e) {
         console.error(`Obcrypt: Failed to decrypt ${file.path}`, e);
@@ -274,41 +226,58 @@ export default class ObcryptPlugin extends Plugin {
     }
   }
 
-  private async encryptAllPrivateNow() {
+  /**
+   * Encrypt all tracked #private files on disk. Called on lock and unload.
+   */
+  private encryptTrackedFiles() {
     if (!this.password) return;
-    let count = 0;
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      try {
-        const content = await this.app.vault.read(file);
-        if (contentHasPrivateTag(content) && !isEncrypted(content)) {
-          const cipher = await encrypt(content, this.password);
-          await this.originalWrite!(file.path, cipher);
-          this.patchedPaths.add(file.path);
-          count++;
-        }
-      } catch {
-        // skip
+    const pw = this.password;
+    for (const path of this.privatePaths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) {
+        this.app.vault.cachedRead(file).then(async (content) => {
+          if (contentHasPrivateTag(content) && !isEncrypted(content)) {
+            try {
+              const cipher = await encrypt(content, pw);
+              await this.app.vault.adapter.write(file.path, cipher);
+            } catch (e) {
+              console.error(`Obcrypt: Failed to encrypt ${file.path}`, e);
+            }
+          }
+        });
       }
     }
-    new Notice(`Obcrypt: Locked ${count} note(s).`);
+  }
+
+  private async lockVault() {
+    if (!this.password || this.locked) {
+      new Notice("Obcrypt: Already locked.");
+      return;
+    }
+    let count = 0;
+    for (const path of this.privatePaths) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) {
+        try {
+          const content = await this.app.vault.cachedRead(file);
+          if (contentHasPrivateTag(content) && !isEncrypted(content)) {
+            const cipher = await encrypt(content, this.password);
+            await this.app.vault.adapter.write(file.path, cipher);
+            count++;
+          }
+        } catch (e) {
+          console.error(`Obcrypt: Failed to encrypt ${file.path}`, e);
+        }
+      }
+    }
+    this.locked = true;
+    this.updateStatusBar();
+    new Notice(`Obcrypt: Locked ${count} note(s). Close and reopen to unlock.`);
   }
 
   private async changePassword() {
-    if (!this.password) return;
+    if (!this.password || this.locked) return;
     const oldPassword = this.password;
-
-    const files: { file: TFile; content: string }[] = [];
-    for (const file of this.app.vault.getMarkdownFiles()) {
-      try {
-        const raw = await this.originalRead!(file.path);
-        if (isEncrypted(raw)) {
-          const plain = await decrypt(raw, oldPassword);
-          files.push({ file, content: plain });
-        }
-      } catch {
-        // skip
-      }
-    }
 
     await this.promptPassword("Enter your new encryption password.");
     if (!this.password) {
@@ -318,13 +287,6 @@ export default class ObcryptPlugin extends Plugin {
     }
 
     clearKeyCache();
-
-    let count = 0;
-    for (const { file, content } of files) {
-      const cipher = await encrypt(content, this.password);
-      await this.originalWrite!(file.path, cipher);
-      count++;
-    }
-    new Notice(`Obcrypt: Re-encrypted ${count} note(s) with new password.`);
+    new Notice("Obcrypt: Password changed. Notes will be encrypted with the new password on lock.");
   }
 }
