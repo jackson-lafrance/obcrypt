@@ -22,6 +22,14 @@
   box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb), 0.2);
 }
 
+.obcrypt-status {
+  cursor: pointer;
+}
+
+.obcrypt-status:hover {
+  color: var(--text-accent);
+}
+
 .obcrypt-btn-row {
   display: flex;
   justify-content: flex-end;

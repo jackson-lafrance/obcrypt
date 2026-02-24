@@ -82,6 +82,12 @@ export default class ObcryptPlugin extends Plugin {
 
   async onload() {
     this.statusBarEl = this.addStatusBarItem();
+    this.statusBarEl.addClass("obcrypt-status");
+    this.statusBarEl.addEventListener("click", () => {
+      if (!this.locked && this.password) {
+        this.lockVault();
+      }
+    });
     this.updateStatusBar();
 
     this.addCommand({
