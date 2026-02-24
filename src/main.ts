@@ -84,7 +84,9 @@ export default class ObcryptPlugin extends Plugin {
     this.statusBarEl = this.addStatusBarItem();
     this.statusBarEl.addClass("obcrypt-status");
     this.statusBarEl.addEventListener("click", () => {
-      if (!this.locked && this.password) {
+      if (this.locked) {
+        this.unlockVault();
+      } else if (this.password) {
         this.lockVault();
       }
     });
@@ -253,6 +255,49 @@ export default class ObcryptPlugin extends Plugin {
         });
       }
     }
+  }
+
+  private async unlockVault() {
+    const encryptedFiles = await this.findEncryptedFiles();
+
+    if (encryptedFiles.length === 0) {
+      await this.promptPassword(
+        "This password encrypts and decrypts your #private notes. Choose a strong password and remember it — there is no recovery."
+      );
+      if (!this.password) return;
+      this.locked = false;
+      this.updateStatusBar();
+      this.scanForPrivateFiles();
+      new Notice("Obcrypt: Unlocked.");
+      return;
+    }
+
+    for (let attempt = 1; attempt <= MAX_PASSWORD_ATTEMPTS; attempt++) {
+      const msg =
+        attempt === 1
+          ? "Enter your password to decrypt your #private notes."
+          : `Wrong password. Attempt ${attempt} of ${MAX_PASSWORD_ATTEMPTS}.`;
+
+      await this.promptPassword(msg);
+      if (!this.password) return;
+
+      try {
+        await decrypt(encryptedFiles[0].raw, this.password);
+        break;
+      } catch {
+        this.password = null;
+        if (attempt === MAX_PASSWORD_ATTEMPTS) {
+          new Notice("Obcrypt: Too many failed attempts.");
+          return;
+        }
+      }
+    }
+
+    await this.decryptAll(encryptedFiles);
+    this.locked = false;
+    this.updateStatusBar();
+    this.scanForPrivateFiles();
+    new Notice(`Obcrypt: Unlocked ${encryptedFiles.length} note(s).`);
   }
 
   private async lockVault() {
