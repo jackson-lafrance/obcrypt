@@ -130,7 +130,7 @@ export default class ObcryptPlugin extends Plugin {
 
   private updateStatusBar() {
     if (!this.statusBarEl) return;
-    this.statusBarEl.setText(this.locked ? "🔒 Obcrypt: Locked" : "🔓 Obcrypt: Unlocked");
+    this.statusBarEl.setText(this.locked ? "\u{1F512} Obcrypt: Locked" : "\u{1F513} Obcrypt: Unlocked");
   }
 
   private async init() {
