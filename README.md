@@ -1,6 +1,14 @@
 # Obcrypt
 
-Transparent encryption for your private notes in Obsidian. Tag any note with `#private` and it will be encrypted on the filesystem automatically — while remaining fully readable and editable in the Obsidian editor.
+Transparent encryption for your private notes in Obsidian.
+
+## Installation
+
+1. Open Obsidian → Settings → Community plugins → Turn off restricted mode (if needed)
+2. Click "Browse" and search for "Obcrypt"
+3. Install and enable the plugin
+
+Or install manually: download the latest [release](https://github.com/jackson-lafrance/obcrypt/releases) and place `main.js`, `manifest.json`, and `styles.css` in your vault's `.obsidian/plugins/obcrypt/` folder. Tag any note with `#private` and it will be encrypted on the filesystem automatically — while remaining fully readable and editable in the Obsidian editor.
 
 ## How it works
 
@@ -48,6 +56,8 @@ To verify, open the `.md` file outside of Obsidian — you'll see the `OBCRYPT:v
 npm install
 npm run build
 ```
+
+For release and publication instructions, see [PUBLISHING.md](PUBLISHING.md).
 
 ## License
 
