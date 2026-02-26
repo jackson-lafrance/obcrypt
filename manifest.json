@@ -5,5 +5,6 @@
   "minAppVersion": "0.15.0",
   "description": "Transparently encrypts notes tagged with #private on the filesystem while keeping them readable in the editor.",
   "author": "slaade",
+  "authorUrl": "https://github.com/jackson-lafrance",
   "isDesktopOnly": false
 }
